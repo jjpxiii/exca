@@ -211,3 +211,19 @@ body {
 .board-card small {
   color: #666;
 }
+
+.board-name-input {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 1rem;
+  padding: 4px 8px;
+  width: 150px;
+  transition: all 0.2s;
+}
+.board-name-input:hover, .board-name-input:focus {
+  background: white;
+  border-color: #ddd;
+  outline: none;
+}

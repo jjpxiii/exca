@@ -357,21 +357,33 @@ export default function App() {
         initialData={initialData}
         isCollaborating={connectionState === "connected"}
         onChange={handleChange}
-        renderTopRightUI={() => (
-          <div className="collab-toolbar" aria-label="Collaboration controls">
-            <span className={`connection-pill ${connectionState}`}>
-              {connectionState === "connected" ? `${peerCount} online` : connectionState}
-            </span>
-            <span className="room-pill">{roomId}</span>
-            <button className="btn-secondary" type="button" onClick={openBoards}>📁 My Boards</button>
-            <button className="btn-secondary" type="button" onClick={() => setShowLockModal(true)}>🔒 Lock</button>
-            <button className="btn-secondary" type="button" onClick={handleShare}>Share</button>
-            <button className="btn-secondary" type="button" onClick={handleNewBoard}>New</button>
-            <button className="btn-primary" type="button" onClick={handleSave} disabled={isSaving}>
-              {saveLabel}
-            </button>
-          </div>
-        )}
+        renderTopRightUI={() => {
+          const name = excalidrawAPI?.getAppState()?.name || "Untitled Board";
+          return (
+            <div className="collab-toolbar" aria-label="Collaboration controls">
+              <input 
+                type="text" 
+                className="board-name-input" 
+                value={name} 
+                onChange={(e) => {
+                  excalidrawAPI?.updateScene({ appState: { name: e.target.value } });
+                }}
+                placeholder="Name your board..."
+                title="Rename this board"
+              />
+              <span className={`connection-pill ${connectionState}`}>
+                {connectionState === "connected" ? `${peerCount} online` : connectionState}
+              </span>
+              <button className="btn-secondary" type="button" onClick={openBoards}>📁 My Boards</button>
+              <button className="btn-secondary" type="button" onClick={() => setShowLockModal(true)}>🔒 Lock</button>
+              <button className="btn-secondary" type="button" onClick={handleShare}>Share</button>
+              <button className="btn-secondary" type="button" onClick={handleNewBoard}>New</button>
+              <button className="btn-primary" type="button" onClick={handleSave} disabled={isSaving}>
+                {saveLabel}
+              </button>
+            </div>
+          );
+        }}
       />
 
       {showBoardsModal && (
