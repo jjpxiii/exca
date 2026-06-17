@@ -259,11 +259,12 @@ export default function App() {
     latestSnapshotRef.current = snapshot;
 
     try {
-      await fetch(`/api/canvas?room=${encodeURIComponent(roomId)}`, {
+      const res = await fetch(`/api/canvas?room=${encodeURIComponent(roomId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(snapshot),
       });
+      if (!res.ok) throw new Error("Server error " + res.status);
       setSaveLabel("Saved");
     } catch (err: unknown) {
       console.error("Canvas save failed", err);

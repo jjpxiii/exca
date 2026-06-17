@@ -63,7 +63,18 @@ app.get('/api/recent-room', async (req, res) => {
 
 // 2. Get list of all rooms for the dashboard
 app.get('/api/rooms', async (req, res) => {
-  if (!sql) return res.json([]);
+  if (!sql) {
+    const rooms = Array.from(latestSnapshots.keys()).map(id => {
+      const data = latestSnapshots.get(id);
+      return {
+        id,
+        name: data?.appState?.name || "Untitled Board",
+        updated_at: new Date().toISOString(),
+        locked: false
+      };
+    });
+    return res.json(rooms);
+  }
   try {
     const rows = await sql`
       SELECT 
