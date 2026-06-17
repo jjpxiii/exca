@@ -1,0 +1,42 @@
+name: Deploy to Deno Deploy
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Nécessaire pour l'authentification automatique avec Deno Deploy
+      contents: read
+
+    steps:
+      - name: Clone du dépôt
+        uses: actions/checkout@v4
+
+      # 1. Compilation du frontend React (Vite)
+      # On utilise Node/NPM uniquement dans le cloud car c'est l'outil le plus stable pour compiler Vite
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Installation et Compilation
+        run: |
+          npm install
+          npm run build
+
+      # 2. Déploiement du backend Deno
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Upload sur Deno Deploy
+        uses: denoland/deployctl@v1
+        with:
+          project: "pistache" # ⚠️ À REMPLACER par le nom de votre projet Deno
+          entrypoint: "server.ts"
+          root: "."
