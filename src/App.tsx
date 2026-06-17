@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { Excalidraw, getSceneVersion } from "@excalidraw/excalidraw";
 import type {
   AppState,
   BinaryFiles,
@@ -104,6 +104,7 @@ export default function App() {
   const sendTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const applyingRemoteSceneRef = useRef(false);
+  const lastSceneVersionRef = useRef<number>(-1);
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -204,6 +205,7 @@ export default function App() {
 
     const applyRemoteSnapshot = (snapshot: BoardSnapshot) => {
       latestSnapshotRef.current = snapshot;
+      lastSceneVersionRef.current = getSceneVersion(snapshot.elements);
       applyingRemoteSceneRef.current = true;
       excalidrawAPI.updateScene({
         elements: snapshot.elements,
@@ -256,6 +258,12 @@ export default function App() {
       if (applyingRemoteSceneRef.current) {
         return;
       }
+
+      const currentVersion = getSceneVersion(elements);
+      if (currentVersion === lastSceneVersionRef.current) {
+        return;
+      }
+      lastSceneVersionRef.current = currentVersion;
 
       const snapshot: BoardSnapshot = {
         elements,

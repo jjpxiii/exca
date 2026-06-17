@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: excalidraw-collab
+    env: node
+    buildCommand: pnpm install && pnpm run build
+    startCommand: pnpm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false

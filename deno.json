@@ -1,6 +1,0 @@
-{
-  "nodeModulesDir": "auto",
-  "compilerOptions": {
-    "lib": ["dom", "dom.iterable", "dom.asynciterable", "deno.ns"]
-  }
-}
