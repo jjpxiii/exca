@@ -12,20 +12,21 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
 
-// Use Express to handle JSON and CORS
 app.use(cors());
-// We handle text manually to parse JSON directly from text like Deno did, 
-// or we can use express.text() since the client sends raw text.
-app.use(express.text({ type: '*/*' })); 
+
+// We need raw text for canvas data to preserve exact JSON formatting,
+// but we need standard json parsing for API routes like /lock
+app.use(express.text({ type: 'text/plain' }));
+app.use(express.json({ limit: '50mb' })); 
 
 const dbUrl = process.env.DATABASE_URL;
 const sql = dbUrl ? neon(dbUrl) : null;
 
 if (sql) {
   try {
-    // Top-level await is supported in ES modules
     await sql`CREATE TABLE IF NOT EXISTS canvases (id VARCHAR(50) PRIMARY KEY, data TEXT)`;
-    console.log("Base de données connectée.");
+    await sql`ALTER TABLE canvases ADD COLUMN IF NOT EXISTS password VARCHAR(255), ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`;
+    console.log("Base de données connectée et vérifiée.");
   } catch (e) {
     console.error("Erreur lors de la vérification de la table :", e);
   }
@@ -33,10 +34,9 @@ if (sql) {
   console.warn("⚠️ DATABASE_URL non définie. Le mode persistance en base de données est désactivé.");
 }
 
-// In-memory state for fast syncing and presence
-const localRooms = new Map(); // roomId -> Set<WebSocket>
-const latestSnapshots = new Map(); // roomId -> snapshot object
-const presenceCount = new Map(); // roomId -> number
+const localRooms = new Map();
+const latestSnapshots = new Map();
+const presenceCount = new Map();
 
 function broadcastLocal(roomId, message, excludeSocket) {
   const sockets = localRooms.get(roomId);
@@ -49,16 +49,70 @@ function broadcastLocal(roomId, message, excludeSocket) {
   }
 }
 
-// REST endpoints for Excalidraw Canvas
+// 1. Get most recently updated room
+app.get('/api/recent-room', async (req, res) => {
+  if (!sql) return res.json({ id: 'main' });
+  try {
+    const rows = await sql`SELECT id FROM canvases ORDER BY updated_at DESC NULLS LAST LIMIT 1`;
+    if (rows.length > 0) return res.json({ id: rows[0].id });
+    res.json({ id: 'main' });
+  } catch (e) {
+    res.json({ id: 'main' });
+  }
+});
+
+// 2. Get list of all rooms for the dashboard
+app.get('/api/rooms', async (req, res) => {
+  if (!sql) return res.json([]);
+  try {
+    const rows = await sql`
+      SELECT 
+        id, 
+        data::json->'appState'->>'name' as name, 
+        updated_at, 
+        (password IS NOT NULL AND password != '') as locked 
+      FROM canvases 
+      ORDER BY updated_at DESC NULLS LAST 
+      LIMIT 50
+    `;
+    res.json(rows);
+  } catch (e) {
+    console.error("GET /api/rooms error:", e);
+    res.status(500).json([]);
+  }
+});
+
+// 3. Lock a room
+app.post('/api/room/lock', async (req, res) => {
+  const { roomId, password } = req.body;
+  if (!sql) return res.status(500).json({ error: "DB not configured" });
+  try {
+    await sql`UPDATE canvases SET password = ${password || null} WHERE id = ${roomId}`;
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to lock" });
+  }
+});
+
 app.get('/api/canvas', async (req, res) => {
   const roomId = req.query.room || 'main';
+  const pwd = req.query.pwd || '';
+  
   try {
-    let data = latestSnapshots.get(roomId);
-    if (!data && sql) {
-      const rows = await sql`SELECT data FROM canvases WHERE id = ${roomId}`;
-      data = rows.length > 0 ? JSON.parse(rows[0].data) : null;
-      if (data) latestSnapshots.set(roomId, data);
+    if (sql) {
+      const rows = await sql`SELECT data, password FROM canvases WHERE id = ${roomId}`;
+      if (rows.length > 0) {
+        const dbPwd = rows[0].password;
+        if (dbPwd && dbPwd !== pwd) {
+          return res.status(401).json({ error: "locked" });
+        }
+        const parsed = JSON.parse(rows[0].data);
+        latestSnapshots.set(roomId, parsed);
+        return res.json(parsed);
+      }
     }
+    
+    let data = latestSnapshots.get(roomId);
     res.json(data || { elements: [], appState: {} });
   } catch (err) {
     console.error("GET error:", err);
@@ -66,17 +120,18 @@ app.get('/api/canvas', async (req, res) => {
   }
 });
 
+// We accept raw text or json objects on POST
 app.post('/api/canvas', async (req, res) => {
   const roomId = req.query.room || 'main';
   try {
-    const text = req.body;
-    latestSnapshots.set(roomId, JSON.parse(text)); // update local cache
+    const text = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    latestSnapshots.set(roomId, JSON.parse(text));
     
     if (sql) {
       await sql`
-        INSERT INTO canvases (id, data) 
-        VALUES (${roomId}, ${text})
-        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
+        INSERT INTO canvases (id, data, updated_at) 
+        VALUES (${roomId}, ${text}, CURRENT_TIMESTAMP)
+        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = CURRENT_TIMESTAMP
       `;
     }
     res.json({ success: true });
@@ -86,15 +141,12 @@ app.post('/api/canvas', async (req, res) => {
   }
 });
 
-// Serve static files from 'dist' directory
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Fallback to index.html for React Router
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-// WebSocket Server
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', async (socket, req) => {
@@ -107,27 +159,33 @@ wss.on('connection', async (socket, req) => {
   }
   
   const roomId = collabMatch[1];
+  const pwd = url.searchParams.get("pwd") || '';
   
+  let snapshot = latestSnapshots.get(roomId);
+
+  if (sql) {
+    try {
+      const rows = await sql`SELECT data, password FROM canvases WHERE id = ${roomId}`;
+      if (rows.length > 0) {
+        const dbPwd = rows[0].password;
+        if (dbPwd && dbPwd !== pwd) {
+          socket.close(4001, "locked");
+          return;
+        }
+        snapshot = JSON.parse(rows[0].data);
+        latestSnapshots.set(roomId, snapshot);
+      }
+    } catch (e) {
+      console.error("DB fetch error on WS connect", e);
+    }
+  }
+
   if (!localRooms.has(roomId)) localRooms.set(roomId, new Set());
   localRooms.get(roomId).add(socket);
   
   const count = (presenceCount.get(roomId) || 0) + 1;
   presenceCount.set(roomId, count);
 
-  let snapshot = latestSnapshots.get(roomId);
-  if (!snapshot && sql) {
-    try {
-      const rows = await sql`SELECT data FROM canvases WHERE id = ${roomId}`;
-      if (rows.length > 0) {
-        snapshot = JSON.parse(rows[0].data);
-        latestSnapshots.set(roomId, snapshot);
-      }
-    } catch (e) {
-      console.error("DB fetch error on connect", e);
-    }
-  }
-
-  // Send initial data to connected client
   socket.send(JSON.stringify({
     type: "init",
     snapshot: snapshot || { elements: [], appState: {}, files: {} },
@@ -135,7 +193,6 @@ wss.on('connection', async (socket, req) => {
     revision: 1
   }));
 
-  // Broadcast presence to everyone
   broadcastLocal(roomId, JSON.stringify({ type: "presence", peers: count }), socket);
 
   socket.on('message', (data) => {
@@ -145,7 +202,6 @@ wss.on('connection', async (socket, req) => {
       
       if (msg.type === "scene") {
         latestSnapshots.set(roomId, msg.snapshot);
-        // Broadcast to everyone else
         broadcastLocal(roomId, JSON.stringify({
           type: "scene",
           snapshot: msg.snapshot,
