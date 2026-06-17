@@ -68,14 +68,30 @@ app.get('/api/rooms', async (req, res) => {
     const rows = await sql`
       SELECT 
         id, 
-        data::json->'appState'->>'name' as name, 
+        data, 
         updated_at, 
         (password IS NOT NULL AND password != '') as locked 
       FROM canvases 
       ORDER BY updated_at DESC NULLS LAST 
       LIMIT 50
     `;
-    res.json(rows);
+    
+    const safeRows = rows.map(r => {
+      let name = "Untitled Board";
+      try {
+        const parsed = JSON.parse(r.data);
+        if (parsed?.appState?.name) name = parsed.appState.name;
+      } catch(e) {}
+      
+      return {
+        id: r.id,
+        name: name,
+        updated_at: r.updated_at,
+        locked: r.locked
+      };
+    });
+    
+    res.json(safeRows);
   } catch (e) {
     console.error("GET /api/rooms error:", e);
     res.status(500).json([]);
