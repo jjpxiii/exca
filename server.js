@@ -5,6 +5,7 @@ import { neon } from '@neondatabase/serverless';
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,6 +48,24 @@ function broadcastLocal(roomId, message, excludeSocket) {
       }
     }
   }
+}
+
+function hashPassword(password) {
+  if (!password) return null;
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derivedKey = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derivedKey}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash) return true;
+  if (!storedHash.includes(':')) {
+    return password === storedHash; // Fallback pour les anciens mots de passe en clair
+  }
+  const [salt, key] = storedHash.split(':');
+  const keyBuffer = Buffer.from(key, 'hex');
+  const derivedKey = crypto.scryptSync(password || '', salt, 64);
+  return crypto.timingSafeEqual(keyBuffer, derivedKey);
 }
 
 // 1. Get most recently updated room
@@ -114,7 +133,8 @@ app.post('/api/room/lock', async (req, res) => {
   const { roomId, password } = req.body;
   if (!sql) return res.status(500).json({ error: "DB not configured" });
   try {
-    await sql`UPDATE canvases SET password = ${password || null} WHERE id = ${roomId}`;
+    const hashed = hashPassword(password);
+    await sql`UPDATE canvases SET password = ${hashed} WHERE id = ${roomId}`;
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: "Failed to lock" });
@@ -130,7 +150,7 @@ app.get('/api/canvas', async (req, res) => {
       const rows = await sql`SELECT data, password FROM canvases WHERE id = ${roomId}`;
       if (rows.length > 0) {
         const dbPwd = rows[0].password;
-        if (dbPwd && dbPwd !== pwd) {
+        if (dbPwd && !verifyPassword(pwd, dbPwd)) {
           return res.status(401).json({ error: "locked" });
         }
         const parsed = JSON.parse(rows[0].data);
@@ -195,7 +215,7 @@ wss.on('connection', async (socket, req) => {
       const rows = await sql`SELECT data, password FROM canvases WHERE id = ${roomId}`;
       if (rows.length > 0) {
         const dbPwd = rows[0].password;
-        if (dbPwd && dbPwd !== pwd) {
+        if (dbPwd && !verifyPassword(pwd, dbPwd)) {
           socket.close(4001, "locked");
           return;
         }
