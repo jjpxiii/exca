@@ -1,6 +1,7 @@
 services:
   - type: web
     name: excalidraw-collab
+    plan: free
     env: node
     buildCommand: pnpm install && pnpm run build
     startCommand: pnpm start
