@@ -27,8 +27,8 @@ importers:
         specifier: ^19.2.6
         version: 19.2.7(react@19.2.7)
       ws:
-        specifier: ^8.18.0
-        version: 8.20.1
+        specifier: ^8.21.0
+        version: 8.21.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -2641,6 +2641,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -5167,6 +5179,8 @@ snapshots:
       - utf-8-validate
 
   ws@8.20.1: {}
+
+  ws@8.21.0: {}
 
   yallist@3.1.1: {}
 
