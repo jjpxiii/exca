@@ -99,6 +99,7 @@ export default function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const latestSnapshotRef = useRef<BoardSnapshot>(EMPTY_BOARD);
   const sendTimerRef = useRef<number | null>(null);
+  const autoSaveTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const applyingRemoteSceneRef = useRef(false);
   const lastSceneVersionRef = useRef<number>(-1);
@@ -106,7 +107,10 @@ export default function App() {
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+    };
   }, []);
 
   // 1. Resolve room ID
@@ -227,25 +231,7 @@ export default function App() {
     socket.send(JSON.stringify({ type: "scene", clientId, snapshot }));
   }, [clientId]);
 
-  const handleChange = useCallback((elements: BoardSnapshot["elements"], appState: AppState, files: BinaryFiles) => {
-    if (applyingRemoteSceneRef.current) return;
-    const currentVersion = getSceneVersion(elements);
-    if (currentVersion === lastSceneVersionRef.current) return;
-    lastSceneVersionRef.current = currentVersion;
-
-    const snapshot: BoardSnapshot = {
-      elements,
-      appState: pickSharedAppState(appState),
-      files,
-      updatedAt: Date.now(),
-    };
-    latestSnapshotRef.current = snapshot;
-
-    if (sendTimerRef.current) window.clearTimeout(sendTimerRef.current);
-    sendTimerRef.current = window.setTimeout(() => sendSnapshot(snapshot), SEND_DEBOUNCE_MS);
-  }, [sendSnapshot]);
-
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!excalidrawAPI || !roomId) return;
     setIsSaving(true);
     setSaveLabel("Saving");
@@ -273,7 +259,35 @@ export default function App() {
       window.setTimeout(() => setSaveLabel("Save"), 1600);
       setIsSaving(false);
     }
-  };
+  }, [excalidrawAPI, roomId]);
+
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  }, [handleSave]);
+
+  const handleChange = useCallback((elements: BoardSnapshot["elements"], appState: AppState, files: BinaryFiles) => {
+    if (applyingRemoteSceneRef.current) return;
+    const currentVersion = getSceneVersion(elements);
+    if (currentVersion === lastSceneVersionRef.current) return;
+    lastSceneVersionRef.current = currentVersion;
+
+    const snapshot: BoardSnapshot = {
+      elements,
+      appState: pickSharedAppState(appState),
+      files,
+      updatedAt: Date.now(),
+    };
+    latestSnapshotRef.current = snapshot;
+
+    if (sendTimerRef.current) window.clearTimeout(sendTimerRef.current);
+    sendTimerRef.current = window.setTimeout(() => sendSnapshot(snapshot), SEND_DEBOUNCE_MS);
+
+    if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      handleSaveRef.current();
+    }, 5000);
+  }, [sendSnapshot]);
 
   const handleShare = async () => {
     await navigator.clipboard.writeText(window.location.href);
